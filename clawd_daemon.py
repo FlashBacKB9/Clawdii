@@ -62,14 +62,16 @@ def _is_pid_alive(pid: int) -> bool:
         return True   # en caso de error, no cerrar
 
 # Must be before QApplication
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--enable-transparent-visuals")
+# --disable-gpu fuerza software rendering y hace fiable el fondo transparente
+# en PySide6 6.x sobre Windows (sin él aparece un recuadro gris/blanco).
+os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
+                      "--enable-transparent-visuals --disable-gpu")
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QUrl
-from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPolygon
+from PySide6.QtGui import QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
-from PySide6.QtWidgets import (QApplication, QLabel, QMenu,
-                                QPushButton, QSizePolicy, QWidget)
+from PySide6.QtWidgets import (QApplication, QLabel, QMenu, QWidget)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -150,294 +152,24 @@ TOOL_STATE: dict[str, str] = {
 # Thread-safe queue: filled by TCP thread, drained by Qt timer on main thread
 _evt_queue: queue.SimpleQueue = queue.SimpleQueue()
 
-# ── Settings cache ────────────────────────────────────────────────────────────
+# ── Question / option detection (para decidir sprite notification vs happy) ────
 
-_settings_cache: dict | None = None
-
-def _read_settings() -> dict:
-    global _settings_cache
-    if _settings_cache is None:
-        try:
-            p = Path.home() / ".claude" / "settings.json"
-            _settings_cache = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            _settings_cache = {}
-    return _settings_cache
-
-
-def _allow_pattern_matches(pattern: str, value: str) -> bool:
-    """Comprueba si 'value' encaja con el patrón del allow list de Claude Code."""
-    if "*" not in pattern:
-        return pattern == value
-    if pattern.endswith(":*"):          # "npm install:*" → starts-with "npm install"
-        return value.startswith(pattern[:-2])
-    if pattern.endswith("**"):          # path glob "//path/**"
-        return value.startswith(pattern[:-2])
-    if pattern.endswith("*"):           # generic prefix
-        return value.startswith(pattern[:-1])
-    return False
-
-
-def _needs_confirmation(tool_name: str, tool_input: dict) -> bool:
-    """True si Claude Code mostrará diálogo de confirmación para esta llamada."""
-    allow = _read_settings().get("permissions", {}).get("allow", [])
-
-    # Wildcard total: el tool entero está permitido
-    if tool_name in allow or f"{tool_name}(*)" in allow:
+def _response_needs_reply(text: str) -> bool:
+    """True si la respuesta de Claude termina con una pregunta o lista de opciones."""
+    if not text:
         return False
-
-    # Extraer el valor a comparar según el tool
-    if tool_name in ("Edit", "Write", "MultiEdit"):
-        value = tool_input.get("file_path", "")
-    elif tool_name in ("Bash", "PowerShell"):
-        value = tool_input.get("command", "")
-    else:
-        return False  # otros tools: no manejamos confirmación
-
-    # Buscar una entrada específica que cubra este valor
-    prefix = f"{tool_name}("
-    for entry in allow:
-        if entry.startswith(prefix) and entry.endswith(")"):
-            pattern = entry[len(prefix):-1]
-            if _allow_pattern_matches(pattern, value):
-                return False
-
-    return True  # sin coincidencia → requiere confirmación
-
-
-# ── Question / option detection ───────────────────────────────────────────────
-
-_QUICK_MARKERS = [
-    "¿procedo", "¿continúo", "¿lo hago", "¿lo ejecuto", "¿lo borro",
-    "¿lo elimino", "¿lo descargo", "¿lo instalo", "¿lo subo", "¿lo guardo",
-    "¿confirmas", "¿confirma", "¿quieres que", "¿puedo ", "¿debo ",
-    "¿sigo", "¿seguimos", "sí o no", "yes or no", "sí/no", "yes/no",
-    "¿ok?", "¿okay?", "¿de acuerdo",
-]
-
-def _extract_options(text: str) -> list[tuple[str, str]]:
-    """Detecta lista numerada de opciones al final del texto.
-    Devuelve [(etiqueta_botón, texto_a_enviar), …] o [] si no hay."""
-    if not text:
-        return []
-    opts: list[tuple[str, str]] = []
-    for line in text[-600:].split("\n"):
-        m = re.match(r"^(\d+)[.)]\s+([^*`]{2,55})$", line.strip())
-        if m:
-            num, label = m.group(1), m.group(2).strip()
-            opts.append((f"{num}. {label[:28]}", num))
-    return opts[:5] if len(opts) >= 2 else []
-
-def _extract_question(text: str) -> str:
-    """Devuelve el último párrafo si es una pregunta sí/no real que requiere respuesta.
-
-    Condiciones (todas deben cumplirse):
-    - El mensaje termina en '?' (Claude está esperando respuesta, no hablando retóricamente)
-    - Contiene uno de los marcadores de permiso/confirmación
-    - El párrafo final tiene ≤ 200 caracteres
-    """
-    if not text:
-        return ""
-    # El texto completo debe terminar con '?' para que Claude esté esperando
-    if not text.rstrip().endswith("?"):
-        return ""
-    if not any(m in text[-400:].lower() for m in _QUICK_MARKERS):
-        return ""
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    part = paragraphs[-1] if paragraphs else text.strip()
-    return part if len(part) <= 200 else ""
-
-
-# ── Speech bubble overlay (Qt-native, no WebEngine) ───────────────────────────
-
-class _TextBubble(QWidget):
-    """Bocadillo flotante pixel-art con botones Qt nativos (100 % fiables)."""
-
-    _W_MIN  = 240
-    _W_MAX  = 440
-    _SHADOW = 3    # px de sombra desplazada
-    _TAIL_H = 14   # altura de la cola triangular
-    _PAD    = 10   # padding interior del box
-
-    _C_BG     = QColor("#FFF8ED")
-    _C_BORDER = QColor("#3D1F00")
-    _C_BTN    = "#C95F1A"
-    _C_BTN_HO = "#8B3A00"
-    _C_BTN_PR = "#5C2000"
-    _C_TEXT   = "#1A0A00"
-    _C_CLOSE  = "#7A4010"
-
-    _BTN_SS = (
-        "QPushButton {{ background:{btn}; color:#FFF8ED;"
-        " border:2px solid #3D1F00; font-family:'Segoe UI';"
-        " font-size:10px; padding:2px 10px; }}"
-        "QPushButton:hover {{ background:{ho}; }}"
-        "QPushButton:pressed {{ background:{pr}; }}"
-    ).format(btn=_C_BTN, ho=_C_BTN_HO, pr=_C_BTN_PR)
-
-    _CLOSE_SS = (
-        "QPushButton { color:#7A4010; font-size:14px; font-weight:bold;"
-        " border:none; background:transparent; padding:0; }"
-        "QPushButton:hover { color:#3D1F00; }"
-    )
-
-    def __init__(self):
-        super().__init__(None)
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-            | Qt.Tool | Qt.NoDropShadowWindowHint
-        )
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-
-        self._answers: list[str] = []
-        self._on_answer = None
-        self._tail_x = 30
-        self._box_h  = 60
-
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)
-        self.hide()
-
-    def set_answer_callback(self, cb):
-        self._on_answer = cb
-
-    def show_near(self, text: str, pet: "ClawdWindow",
-                  options: list[tuple[str, str]] | None = None,
-                  timeout_ms: int = 30_000):
-        if options is None:
-            options = [("Sí", "Sí"), ("No", "No")]
-        self._answers = [ans for _, ans in options]
-
-        # Guardar el HWND de la ventana activa (Claude) ANTES de mostrarnos.
-        # En este momento Claude tiene el foco; lo restauraremos al responder.
-        self._prev_hwnd: int = _user32.GetForegroundWindow()
-
-        # Eliminar hijos previos
-        for child in self.findChildren(QWidget):
-            child.setParent(None)  # type: ignore[arg-type]
-            child.deleteLater()
-
-        PAD    = self._PAD
-        SHADOW = self._SHADOW
-        TAIL_H = self._TAIL_H
-
-        # ── Ancho dinámico ────────────────────────────────────────────────────
-        max_lbl = max((len(lbl) for lbl, _ in options), default=4)
-        btn_w_est = max_lbl * 7 + 24   # 7 px/char + padding (10+10) + borde (2+2)
-        w = max(self._W_MIN, min(self._W_MAX, btn_w_est + PAD * 2 + SHADOW + 20))
-        inner_w = w - SHADOW - PAD * 2 - 20   # ancho útil para texto (20 = X btn)
-
-        # ── Etiqueta de texto ─────────────────────────────────────────────────
-        lbl = QLabel(text, self)
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet(
-            f"QLabel {{ font-family:'Segoe UI'; font-size:11px;"
-            f" color:{self._C_TEXT}; background:transparent; border:none; }}"
-        )
-        lbl.setFixedWidth(inner_w)
-        lbl.adjustSize()
-        text_h = lbl.height()
-        lbl.move(PAD, PAD)
-
-        # ── Botón cerrar ──────────────────────────────────────────────────────
-        close = QPushButton("×", self)
-        close.setFixedSize(18, 18)
-        close.setStyleSheet(self._CLOSE_SS)
-        close.move(w - SHADOW - 20, PAD - 2)
-        close.clicked.connect(self.hide_bubble)
-        close.show()
-
-        # ── Botones de opción (con wrapping manual) ───────────────────────────
-        GAP = 5
-        bx_cur = PAD
-        by_cur = PAD + text_h + GAP
-        row_h  = 0
-        btn_widgets: list[QPushButton] = []
-
-        for i, (btn_lbl, _) in enumerate(options):
-            b = QPushButton(btn_lbl, self)
-            b.setStyleSheet(self._BTN_SS)
-            bw = b.sizeHint().width()
-            bh = b.sizeHint().height()
-            row_h = max(row_h, bh)
-
-            # Wrap si no cabe en esta fila
-            if btn_widgets and bx_cur + bw > w - SHADOW - PAD:
-                bx_cur = PAD
-                by_cur += row_h + GAP
-                row_h  = bh
-
-            b.setGeometry(bx_cur, by_cur, bw, bh)
-            bx_cur += bw + GAP
-            n = i
-            b.clicked.connect(lambda checked=False, idx=n: self._click(idx))
-            b.show()
-            btn_widgets.append(b)
-
-        box_h   = by_cur + row_h + PAD
-        total_h = box_h + SHADOW + TAIL_H
-        self._box_h = box_h
-        self.resize(w, total_h)
-
-        # ── Posición en pantalla ──────────────────────────────────────────────
-        scr     = QApplication.primaryScreen().availableGeometry()
-        pg      = pet.frameGeometry()
-        char_cx = pg.left() + pg.width() // 2
-
-        win_x = max(4, min(char_cx - w // 2, scr.right() - w - 4))
-        # Bubble just above the pet; si debug activo, deja espacio al label
-        debug_h = (pet._debug_lbl.height() + 4) if getattr(pet, "_debug_mode", False) else 0
-        win_y = max(4, pg.top() - total_h - 2 - debug_h)
-
-        self._tail_x = max(12, min(char_cx - win_x, w - 20))
-
-        self.move(win_x, win_y)
-        self.show()
-        self.raise_()
-        self._timer.start(timeout_ms)
-
-    def _click(self, idx: int):
-        if 0 <= idx < len(self._answers) and self._on_answer:
-            self._on_answer(self._answers[idx])
-
-    def hide_bubble(self):
-        self._timer.stop()
-        self.hide()
-
-    def paintEvent(self, _event):
-        p = QPainter(self)
-        w, sh, bh, tx, th = (
-            self.width(), self._SHADOW, self._box_h, self._tail_x, self._TAIL_H
-        )
-
-        # Sombra del box (rectángulo marrón desplazado)
-        p.fillRect(sh, sh, w - sh, bh, self._C_BORDER)
-        # Fondo crema
-        p.fillRect(0, 0, w - sh, bh, self._C_BG)
-        # Borde
-        p.setPen(QPen(self._C_BORDER, 2))
-        p.drawRect(1, 1, w - sh - 2, bh - 2)
-
-        tail_y = bh + sh
-        p.setPen(Qt.NoPen)
-
-        # Cola — sombra marrón desplazada
-        p.setBrush(self._C_BORDER)
-        p.drawPolygon(QPolygon([
-            QPoint(tx - 9 + sh, tail_y),
-            QPoint(tx + 9 + sh, tail_y),
-            QPoint(tx + sh,     tail_y + th),
-        ]))
-        # Cola — relleno crema con borde
-        p.setBrush(self._C_BG)
-        p.setPen(QPen(self._C_BORDER, 2))
-        p.drawPolygon(QPolygon([
-            QPoint(tx - 9, tail_y),
-            QPoint(tx + 9, tail_y),
-            QPoint(tx,     tail_y + th),
-        ]))
+    t = text.rstrip()
+    # Pregunta directa
+    if t.endswith("?"):
+        return True
+    # Lista numerada de opciones (≥2 líneas con "N." o "N)")
+    count = 0
+    for line in t[-600:].split("\n"):
+        if re.match(r"^\d+[.)]\s+\S", line.strip()):
+            count += 1
+            if count >= 2:
+                return True
+    return False
 
 
 # ── HTML generation ───────────────────────────────────────────────────────────
@@ -781,12 +513,13 @@ class ClawdWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
 
-        # WebView
+        # WebView — fondo explícitamente transparente
         self._view = QWebEngineView(self)
         _page = QWebEnginePage(self._view)
         _page.setBackgroundColor(Qt.transparent)
         self._view.setPage(_page)
         self._view.setContextMenuPolicy(Qt.NoContextMenu)
+        self._view.setStyleSheet("background: transparent;")
 
         # Mouse overlay (on top of WebView)
         self._overlay = _MouseOverlay(self)
@@ -844,17 +577,6 @@ class ClawdWindow(QWidget):
         self._state_delay_timer = QTimer(self)
         self._state_delay_timer.setSingleShot(True)
         self._state_delay_timer.timeout.connect(self._apply_pending_state)
-
-        # Speech bubble overlay
-        self._bubble = _TextBubble()
-        self._bubble.set_answer_callback(self._on_bubble_answer)
-
-        # Bubble con delay: evita flash cuando la herramienta se auto-aprueba rápido.
-        # _schedule_bubble() arranca el timer; si llega tool_done antes, se cancela.
-        self._pending_bubble_args: tuple | None = None   # (prompt, options, timeout_ms)
-        self._show_bubble_timer = QTimer(self)
-        self._show_bubble_timer.setSingleShot(True)
-        self._show_bubble_timer.timeout.connect(self._flush_pending_bubble)
 
         # Place on taskbar
         self._place_on_taskbar(x_hint)
@@ -966,128 +688,6 @@ class ClawdWindow(QWidget):
         self.move(x, self._taskbar_y())
 
     # ── Helpers ───────────────────────────────────────────────────────────
-
-    # Códigos de tecla virtual usados para envío directo
-    _VK_RETURN  = 0x0D
-    _VK_DOWN    = 0x28
-    _VK_CONTROL = 0x11
-    _VK_V       = 0x56
-    _KEYEVENTF_KEYUP = 0x0002
-
-    def _press_vk(self, vk: int):
-        """Pulsa y suelta una tecla virtual vía keybd_event."""
-        _user32.keybd_event(vk, 0, 0, 0)
-        _user32.keybd_event(vk, 0, self._KEYEVENTF_KEYUP, 0)
-
-    def _send_keys_now(self, keys: str):
-        """Envía la secuencia de teclas al foreground window actual vía keybd_event.
-
-        Tokens soportados entre llaves: {DOWN}, {ENTER}, {PASTE} (=Ctrl+V).
-        Sin procesos externos — más fiable que SendKeys de PowerShell.
-        """
-        i = 0
-        while i < len(keys):
-            if keys[i] == '{':
-                try:
-                    j = keys.index('}', i)
-                    token = keys[i + 1:j].upper()
-                except ValueError:
-                    i += 1
-                    continue
-                if token == 'DOWN':
-                    self._press_vk(self._VK_DOWN)
-                elif token == 'ENTER':
-                    self._press_vk(self._VK_RETURN)
-                elif token == 'PASTE':
-                    # Ctrl+V — pega desde el portapapeles (el texto ya está ahí)
-                    _user32.keybd_event(self._VK_CONTROL, 0, 0, 0)
-                    self._press_vk(self._VK_V)
-                    _user32.keybd_event(self._VK_CONTROL, 0, self._KEYEVENTF_KEYUP, 0)
-                i = j + 1
-            else:
-                i += 1
-
-    def _send_keys_to_claude(self, keys: str, hwnd: int = 0):
-        """Trae la ventana de Claude al frente y programa el envío de teclas.
-
-        Usa keybd_event directamente (sin spawn de proceso), lo que elimina
-        los problemas de timing que tenía el enfoque de PowerShell SendKeys.
-        """
-        target = hwnd or self._claude_hwnd
-        if not target:
-            target = _find_hwnd_for_pid(self._claude_pid)
-
-        if target and _user32.IsWindow(target):
-            _user32.SetForegroundWindow(target)
-
-        # 500 ms: tiempo suficiente para que SetForegroundWindow surta efecto
-        # antes de que keybd_event dispare las teclas al foreground window.
-        QTimer.singleShot(500, lambda: self._send_keys_now(keys))
-
-    def _schedule_bubble(self, prompt: str, options: list, timeout_ms: int,
-                         delay_ms: int = 600):
-        """Muestra el bubble tras `delay_ms` ms.
-
-        Si antes de que expire el timer llega on_tool_done / on_user_prompt,
-        se cancela con _cancel_pending_bubble() y el bubble nunca aparece.
-        delay_ms=0 → mostrar inmediatamente (para bubbles de Stop, preguntas encadenadas).
-        """
-        self._pending_bubble_args = (prompt, options, timeout_ms)
-        if delay_ms <= 0:
-            self._flush_pending_bubble()
-        else:
-            self._show_bubble_timer.start(delay_ms)
-
-    def _cancel_pending_bubble(self):
-        """Cancela un bubble programado que aún no se ha mostrado."""
-        self._show_bubble_timer.stop()
-        self._pending_bubble_args = None
-
-    def _flush_pending_bubble(self):
-        """Timer callback: muestra el bubble si sigue pendiente."""
-        if self._pending_bubble_args is None:
-            return
-        prompt, options, timeout_ms = self._pending_bubble_args
-        self._pending_bubble_args = None
-        self._bubble.show_near(prompt, self, options=options, timeout_ms=timeout_ms)
-
-    def _on_bubble_answer(self, answer: str):
-        """El usuario hizo clic en un botón del bocadillo.
-
-        answer puede ser:
-          "__nav__N"  → navegar N posiciones abajo con ↓ y confirmar con Enter
-          texto       → teclear el texto + Enter en la ventana de Claude
-        """
-        # Construir secuencia de teclas
-        if answer.startswith("__nav__"):
-            try:
-                n = int(answer[7:])
-            except ValueError:
-                n = 0
-            keys = "{DOWN}" * n + "{ENTER}"
-        else:
-            # El texto ya está en el portapapeles (línea siguiente);
-            # usamos {PASTE} (Ctrl+V) en lugar de teclear carácter a carácter.
-            keys = "{PASTE}{ENTER}"
-
-        # Recuperar el HWND: primero el capturado en el hook (más fiable),
-        # luego el capturado en el daemon al mostrar el bubble (fallback).
-        hwnd = self._claude_hwnd or getattr(self._bubble, "_prev_hwnd", 0)
-        QApplication.clipboard().setText(answer)
-
-        # Restaurar foco a Claude MIENTRAS el daemon aún tiene foco (post-click)
-        # y luego enviar teclas con un pequeño delay
-        self._send_keys_to_claude(keys, hwnd)
-
-        # Ocultar bubble DESPUÉS de SetForegroundWindow para que ctypes aún
-        # tenga autorización de mover el foco (el proceso con foco puede hacerlo)
-        self._bubble.hide_bubble()
-
-        # Si hay preguntas pendientes, mostrar la siguiente tras un delay.
-        # delay_ms=0: los 800ms del singleShot ya son suficiente pausa.
-        if getattr(self, "_pending_questions", []):
-            next_q = self._pending_questions.pop(0)
-            QTimer.singleShot(800, lambda: self._show_ask_question(next_q, delay_ms=0))
 
     def _open_claude(self):
         """Trae al frente la ventana de Claude Code asociada a esta sesión."""
@@ -1203,12 +803,11 @@ class ClawdWindow(QWidget):
     def close_with_animation(self):
         """Para todos los timers, reproduce la animación de salida y cierra."""
         for t in [self._move_timer, self._beh_timer, self._sleep_check_timer,
-                  self._state_delay_timer, self._show_bubble_timer]:
+                  self._state_delay_timer]:
             t.stop()
         for mini in self._mini_pets:
             mini.close_mini()
         self._mini_pets.clear()
-        self._bubble.hide_bubble()
 
         self._load_going_away(reverse=False)
         QTimer.singleShot(self.ANIM_AWAY_MS, self._do_close)
@@ -1251,29 +850,17 @@ class ClawdWindow(QWidget):
             self._set_state("idle", urgent=True)
 
     def on_user_prompt(self):
-        """User submitted a prompt → hide bubble, think."""
+        """User submitted a prompt → think."""
         self._set_claude_event("UserPromptSubmit")
         self._touch_activity()
-        self._cancel_pending_bubble()
-        self._bubble.hide_bubble()
-        self._pending_questions = []
         self._walk_mode = "wander"
         self._set_state("thinking", urgent=True)
 
     def on_tool_done(self, tool_name: str = ""):
-        """Tool completed (PostToolUse) → cancelar bubble y limpiar estado."""
+        """Tool completed (PostToolUse)."""
         self._set_claude_event("PostToolUse", tool_name)
-        if tool_name in ("Edit", "Write", "MultiEdit", "Bash", "PowerShell"):
-            self._cancel_pending_bubble()
-            self._bubble.hide_bubble()
-            self._pending_questions = []
-            if self._state == "notification":
-                self._set_state("thinking", urgent=True)
-        elif tool_name == "AskUserQuestion":
-            # El usuario respondió (en el terminal o via bubble) → limpiar todo
-            self._cancel_pending_bubble()
-            self._bubble.hide_bubble()
-            self._pending_questions = []
+        if tool_name == "AskUserQuestion":
+            # El usuario respondió en el terminal → volver a thinking
             if self._state == "notification":
                 self._set_state("thinking", urgent=True)
         # Los mini-pets de Agent/Task se cierran vía on_subagent_stop().
@@ -1282,27 +869,17 @@ class ClawdWindow(QWidget):
         """A tool is about to be used → show matching sprite."""
         self._set_claude_event("PreToolUse", tool_name)
         self._touch_activity()
-        if tool_name != "AskUserQuestion":
-            self._cancel_pending_bubble()
-            self._bubble.hide_bubble()
-            self._pending_questions = []
 
-        # Herramientas interactivas con diálogo propio
-        if tool_name == "AskUserQuestion" and tool_input is not None:
-            self._handle_ask_user(tool_input)
+        # AskUserQuestion → sprite de notificación (el usuario responde en el terminal)
+        if tool_name == "AskUserQuestion":
+            self._walk_mode = "wander"
+            self._set_state("notification", urgent=True)
             return
 
         # Sub-agente: el spawn de mini-pets lo gestiona on_subagent_start().
         # Aquí solo cambiamos el sprite a "executing".
         if tool_name in ("Agent", "Task"):
             self._set_state("executing", urgent=True)
-            return
-
-        # Diálogo de confirmación (Edit/Write/Bash/PowerShell no pre-aprobados)
-        ti = tool_input or {}
-        if tool_name in ("Edit", "Write", "MultiEdit", "Bash", "PowerShell") \
-                and _needs_confirmation(tool_name, ti):
-            self._handle_edit_confirm(tool_name, ti)
             return
 
         target = TOOL_STATE.get(tool_name)
@@ -1312,123 +889,21 @@ class ClawdWindow(QWidget):
             self._walk_mode = "wander"
             self._set_state("thinking")
 
-    def _handle_edit_confirm(self, tool_name: str, tool_input: dict):
-        """Diálogo nativo de Claude Code de confirmación de herramienta."""
-        if tool_name in ("Bash", "PowerShell"):
-            cmd = tool_input.get("command", "")
-            # Mostrar solo los primeros 60 chars del comando
-            label = cmd[:60] + ("…" if len(cmd) > 60 else "")
-            prompt = f"¿Ejecutar {tool_name}?\n{label}" if label else f"¿Ejecutar {tool_name}?"
-            # El diálogo de Bash/PowerShell solo tiene Yes / No
-            opts = [("Sí", "__nav__0"), ("No", "__nav__1")]
-        else:
-            fpath = tool_input.get("file_path", "")
-            fname = Path(fpath).name if fpath else tool_name
-            prompt = f"¿Editar {fname}?"
-            # El diálogo de Edit tiene Yes / Yes always / No
-            opts = [
-                ("Sí",          "__nav__0"),
-                ("Sí, siempre", "__nav__1"),
-                ("No",          "__nav__2"),
-            ]
-        self._walk_mode = "wander"
-        self._set_state("notification", urgent=True)
-        self._schedule_bubble(prompt, opts, timeout_ms=120_000, delay_ms=600)
-
-    # Frases que indican una confirmación interna de Claude Code que no debe
-    # mostrarse al usuario — se auto-confirman enviando ENTER.
-    _AUTO_CONFIRM_PATTERNS = [
-        "ready to submit",
-        "submit your answer",
-        "confirm your selection",
-        "confirm your answer",
-    ]
-
-    @staticmethod
-    def _is_auto_confirm(q: dict) -> bool:
-        text = (q.get("question") or q.get("header") or "").lower()
-        return any(pat in text for pat in ClawdWindow._AUTO_CONFIRM_PATTERNS)
-
-    def _handle_ask_user(self, tool_input: dict):
-        """AskUserQuestion: muestra bocadillo con las opciones del menú interactivo.
-
-        Formato real de tool_input:
-          { "questions": [{ "question": "...", "header": "...",
-                            "options": [{"label": "...", "description": "..."}, …],
-                            "multiSelect": false }] }
-        Si hay varias preguntas, se muestran en secuencia (una tras otra).
-        Las preguntas de confirmación interna ("Ready to submit?") se auto-confirman.
-        """
-        questions = tool_input.get("questions", [])
-        if not questions:
-            # Fallback formato plano
-            questions = [{
-                "question": (tool_input.get("prompt") or tool_input.get("question")
-                             or "¿Qué opción prefieres?"),
-                "options":  tool_input.get("options", []),
-            }]
-
-        # Filtrar preguntas de confirmación interna de Claude Code
-        real_qs    = [q for q in questions if not self._is_auto_confirm(q)]
-        confirm_qs = [q for q in questions if     self._is_auto_confirm(q)]
-
-        if confirm_qs and not real_qs:
-            # Solo confirmaciones → auto-ENTER, nada que mostrar
-            QTimer.singleShot(200, lambda: self._send_keys_to_claude("{ENTER}", self._claude_hwnd))
-            return
-
-        if not real_qs:
-            return
-
-        # Guardar las preguntas restantes para mostrarlas en secuencia
-        self._pending_questions = list(real_qs[1:])
-        self._walk_mode = "wander"
-        self._set_state("notification", urgent=True)
-        self._show_ask_question(real_qs[0])
-
-    def _show_ask_question(self, q: dict, delay_ms: int = 600):
-        """Muestra el bocadillo para una pregunta individual de AskUserQuestion."""
-        prompt   = (q.get("question") or q.get("header") or "¿Qué opción prefieres?")[:200]
-        raw_opts = q.get("options", [])
-
-        bubble_opts: list[tuple[str, str]] = []
-        for i, opt in enumerate(raw_opts):
-            lbl = opt.get("label") or opt.get("title") or str(opt) if isinstance(opt, dict) else str(opt)
-            bubble_opts.append((f"{i + 1}. {lbl}", f"__nav__{i}"))
-
-        if not bubble_opts:
-            bubble_opts = [("Sí", "__nav__0"), ("No", "__nav__1")]
-
-        self._schedule_bubble(prompt, bubble_opts, timeout_ms=300_000, delay_ms=delay_ms)
-
     def on_stop(self, last_text: str = ""):
         """Response finished.
 
-        1. Opciones numeradas  → notification + bocadillo con botones de opción
-        2. Pregunta sí/no      → notification + bocadillo Sí/No
-        3. Respuesta normal    → happy (3 s) → idle
+        Si la respuesta termina con una pregunta o lista de opciones → notification.
+        Respuesta normal → happy (3 s) → idle.
+        El usuario responde siempre en el terminal, sin burbujas.
         """
         self._set_claude_event("Stop")
         self._touch_activity()
-        opts = _extract_options(last_text)
-        if opts:
+        if _response_needs_reply(last_text):
             self._walk_mode = "wander"
             self._set_state("notification", urgent=True)
-            self._schedule_bubble("Elige:", opts, timeout_ms=60_000, delay_ms=0)
+            # Timeout de seguridad: si el usuario no responde en 5 min, happy → idle
             QTimer.singleShot(300_000, self._notification_timeout)
             return
-
-        question = _extract_question(last_text)
-        if question:
-            self._walk_mode = "wander"
-            self._set_state("notification", urgent=True)
-            self._schedule_bubble(
-                question, [("Sí", "Sí"), ("No", "No")],
-                timeout_ms=60_000, delay_ms=0,
-            )
-            QTimer.singleShot(300_000, self._notification_timeout)
-            return
-
         # Respuesta normal
         self._walk_mode = "wander"
         self._set_state("happy", urgent=True)
@@ -1485,10 +960,9 @@ class ClawdWindow(QWidget):
         self._set_state("idle", urgent=True)
 
     def _notification_timeout(self):
-        """User didn't respond in 5 min → give up waiting."""
+        """5 min sin respuesta del usuario → volver a happy → idle."""
         if self._state != "notification":
             return
-        self._bubble.hide_bubble()
         self._set_state("happy", urgent=True)
         QTimer.singleShot(3_000, self._finish_step_idle)
 
