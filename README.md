@@ -1,4 +1,4 @@
-# Claw'dii 🦀
+# Claw'dii
 
 Un pet de escritorio para Windows que vive en la barra de tareas y reacciona en tiempo real a lo que está haciendo Claude Code.
 
@@ -85,6 +85,20 @@ Elimina las entradas de `clawd_hook.py` de `~/.claude/settings.json` y borra la 
 **Assets SVG:** [marciogranzotto/clawd-tank](https://github.com/marciogranzotto/clawd-tank) — sprites pixel-art del cangrejo animado
 
 **Lógica de estados de sub-agentes:** inspirada en [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents)
+
+---
+
+## Otros proyectos del autor
+
+Si te ha gustado Claw'dii, echa un vistazo a estos otros proyectos:
+
+**StorageDex** — Organiza tus cajas de almacenamiento con un inventario visual 3D. Disponible en Android.  
+[![Get it on Google Play](https://img.shields.io/badge/Google%20Play-StorageDex-brightgreen?logo=google-play)](https://play.google.com/store/apps/details?id=com.flashbackb9.storagedex)
+
+**Caulky** — App de finanzas personales. Backend FastAPI + PostgreSQL, autoalojada.  
+[![GitHub](https://img.shields.io/badge/GitHub-Caulky-blue?logo=github)](https://github.com/FlashBacKB9/Caulky)
+
+---
 
 ## Licencia
 
