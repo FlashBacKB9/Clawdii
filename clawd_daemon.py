@@ -71,7 +71,8 @@ from PySide6.QtCore import Qt, QPoint, QTimer, QUrl
 from PySide6.QtGui import QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
-from PySide6.QtWidgets import (QApplication, QLabel, QMenu, QWidget)
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMenu,
+                                QPushButton, QVBoxLayout, QWidget)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -170,6 +171,149 @@ def _response_needs_reply(text: str) -> bool:
             if count >= 2:
                 return True
     return False
+
+
+# ── Debug panel ──────────────────────────────────────────────────────────────
+
+class _DebugPanel(QWidget):
+    """Panel flotante de debug con info de estado y controles de ajuste en vivo."""
+
+    _PANEL_SS = """
+        _DebugPanel {
+            background: #0D0D1F;
+            border: 1px solid #7FFF00;
+            border-radius: 4px;
+        }
+    """
+    _LBL_SS   = "color:#7FFF00; font-family:Consolas,monospace; font-size:10px; background:transparent; border:none;"
+    _SEP_SS   = "color:#2A2A4E; font-family:Consolas,monospace; font-size:8px;  background:transparent; border:none;"
+    _VAL_SS   = "color:#FFFFFF; font-family:Consolas,monospace; font-size:10px; font-weight:bold; background:transparent; border:none; min-width:36px;"
+    _BTN_SS   = """
+        QPushButton {
+            color:#7FFF00; background:#1A1A30;
+            border:1px solid #7FFF00; border-radius:2px;
+            font-family:Consolas; font-size:13px; font-weight:bold;
+            min-width:22px; max-width:22px; min-height:20px; max-height:20px;
+            padding:0;
+        }
+        QPushButton:hover   { background:#2A2A50; }
+        QPushButton:pressed { background:#7FFF00; color:#0D0D1F; }
+    """
+
+    def __init__(self, pet: "ClawdWindow"):
+        super().__init__(None)
+        self._pet = pet
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+            | Qt.Tool | Qt.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setStyleSheet(self._PANEL_SS)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(3)
+
+        # ── Bloque de información ──────────────────────────────────────────
+        self._info = QLabel()
+        self._info.setStyleSheet(self._LBL_SS)
+        self._info.setTextFormat(Qt.PlainText)
+        root.addWidget(self._info)
+
+        sep = QLabel("─" * 28)
+        sep.setStyleSheet(self._SEP_SS)
+        root.addWidget(sep)
+
+        # ── Fila y_offset ─────────────────────────────────────────────────
+        self._y_val = self._add_control_row(root, "y_offset",
+                                            lambda: self._adjust("y", -1),
+                                            lambda: self._adjust("y", +1))
+
+        # ── Fila escala ───────────────────────────────────────────────────
+        self._s_val = self._add_control_row(root, "escala  ",
+                                            lambda: self._adjust("s", -1),
+                                            lambda: self._adjust("s", +1))
+        self.hide()
+
+    def _add_control_row(self, layout: QVBoxLayout, label: str,
+                         on_minus, on_plus) -> QLabel:
+        row = QHBoxLayout()
+        row.setSpacing(5)
+
+        lbl = QLabel(label)
+        lbl.setStyleSheet(self._LBL_SS)
+        lbl.setFixedWidth(62)
+        row.addWidget(lbl)
+
+        btn_m = QPushButton("−")
+        btn_m.setStyleSheet(self._BTN_SS)
+        btn_m.clicked.connect(on_minus)
+        row.addWidget(btn_m)
+
+        val = QLabel("0")
+        val.setStyleSheet(self._VAL_SS)
+        val.setFixedWidth(38)
+        val.setAlignment(Qt.AlignCenter)
+        row.addWidget(val)
+
+        btn_p = QPushButton("+")
+        btn_p.setStyleSheet(self._BTN_SS)
+        btn_p.clicked.connect(on_plus)
+        row.addWidget(btn_p)
+
+        row.addStretch()
+        layout.addLayout(row)
+        return val
+
+    # ── Ajuste en vivo ─────────────────────────────────────────────────────
+
+    def _adjust(self, which: str, delta: int):
+        pet = self._pet
+        if which == "y":
+            pet._y_offset = max(-30, min(80, pet._y_offset + delta))
+            if not pet._dragging:
+                pet.move(pet.x(), pet._taskbar_y())
+        else:
+            pet._scale = max(2, min(12, pet._scale + delta))
+            pet._current_key = ""
+            if pet._debug_sprite and pet._debug_sprite in SPRITE_MAP:
+                pet._load_sprite(pet._debug_sprite)
+        self.refresh()
+
+    # ── Datos y posición ───────────────────────────────────────────────────
+
+    def refresh(self):
+        """Actualiza texto, valores y reposiciona el panel encima del pet."""
+        pet = self._pet
+        svg_name = SPRITE_MAP.get(pet._debug_sprite, ("?",))[0]
+        svg_short = svg_name.replace("clawd-", "").replace(".svg", "") if svg_name != "?" else "?"
+
+        self._info.setText(
+            f"estado:  {pet._state}\n"
+            f"sprite:  {svg_short}\n"
+            f"escala:  {pet._scale}  ({pet.width()} × {pet.height()} px)"
+        )
+        self._y_val.setText(str(pet._y_offset))
+        self._s_val.setText(str(pet._scale))
+        self.adjustSize()
+        self._reposition()
+
+    def _reposition(self):
+        scr = QApplication.primaryScreen().availableGeometry()
+        pg  = self._pet.frameGeometry()
+        cx  = pg.left() + pg.width() // 2
+        pw  = max(self.width(), 240)
+        x   = max(4, min(cx - pw // 2, scr.right() - pw - 4))
+        y   = max(4, pg.top() - self.height() - 6)
+        self.move(x, y)
+
+    def show_panel(self):
+        self.refresh()
+        self.show()
+        self.raise_()
+
+    def hide_panel(self):
+        self.hide()
 
 
 # ── HTML generation ───────────────────────────────────────────────────────────
@@ -369,7 +513,7 @@ class MiniClawdWindow(QWidget):
           mini_top    = pies_padre − (mini_height − 3 * MINI_SCALE)
         """
         scr = QApplication.primaryScreen().availableGeometry()
-        parent_feet_y = scr.bottom() + self._parent._y_offset - 3 * SCALE
+        parent_feet_y = scr.bottom() + self._parent._y_offset - 3 * self._parent._scale
         return parent_feet_y - (self.height() - 3 * MINI_SCALE)
 
     def _place_near_parent(self):
@@ -454,7 +598,7 @@ class MiniClawdWindow(QWidget):
 
         # Alinear el suelo (SVG y=15) con la Y de los pies del padre
         scr = QApplication.primaryScreen().availableGeometry()
-        parent_feet_y = scr.bottom() + self._parent._y_offset - 3 * SCALE
+        parent_feet_y = scr.bottom() + self._parent._y_offset - 3 * self._parent._scale
         ground_px = round((15.0 - y0) / vb_h * h)
         self.move(self.x(), parent_feet_y - ground_px)
 
@@ -525,19 +669,15 @@ class ClawdWindow(QWidget):
         self._overlay = _MouseOverlay(self)
         self._overlay.raise_()
 
-        # Debug overlay: shows current state when debug mode is on
-        self._debug_mode = False
+        # Debug panel (flotante, solo visible en modo debug)
+        self._debug_mode   = False
         self._debug_sprite = ""
-        self._claude_event = "—"   # último evento de hook recibido
-        self._claude_tool  = ""    # última herramienta (si aplica)
-        self._debug_lbl = QLabel("", self)
-        self._debug_lbl.setStyleSheet(
-            "QLabel { background: rgba(0,0,0,190); color: #7FFF00;"
-            " font-family: 'Consolas', monospace; font-size: 8px;"
-            " padding: 2px 4px; border-radius: 2px; }"
-        )
-        self._debug_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._debug_lbl.hide()
+        self._claude_event = "—"
+        self._claude_tool  = ""
+        self._debug_panel  = _DebugPanel(self)
+
+        # Escala de renderizado (px por unidad SVG); ajustable desde el panel de debug
+        self._scale = SCALE   # default: 5
 
         # Rendering state
         self._current_key = ""
@@ -610,7 +750,7 @@ class ClawdWindow(QWidget):
         _, vb = SPRITE_MAP[name]
         x0, y0, vb_w, vb_h = (float(v) for v in vb.split())
         sc = SPRITE_SCALE.get(name, 1.0)
-        w, h = round(vb_w * SCALE * sc), round(vb_h * SCALE * sc)
+        w, h = round(vb_w * self._scale * sc), round(vb_h * self._scale * sc)
 
         if self.width() != w or self.height() != h:
             self.resize(w, h)
@@ -636,7 +776,7 @@ class ClawdWindow(QWidget):
 
         _, vb = SPRITE_MAP["going_away"]
         x0, y0, vb_w, vb_h = (float(v) for v in vb.split())
-        w, h = round(vb_w * SCALE), round(vb_h * SCALE)
+        w, h = round(vb_w * self._scale), round(vb_h * self._scale)
 
         # Guardar el centro X actual ANTES de hacer resize, para mantenerlo.
         cx = self.x() + self.width() // 2
@@ -645,11 +785,13 @@ class ClawdWindow(QWidget):
         self._view.resize(w, h)
         self._overlay.resize(w, h)
 
+        self._debug_sprite = "going_away"
+
         # Y: alinear el suelo (SVG y=15) con la posición de los pies de los sprites normales.
         # X: centrar la ventana going_away en el mismo punto que el sprite anterior,
         #    para que el personaje no salte al cambiar de tamaño.
         scr = QApplication.primaryScreen().availableGeometry()
-        regular_feet_y = scr.bottom() + self._y_offset - 3 * SCALE
+        regular_feet_y = scr.bottom() + self._y_offset - 3 * self._scale
         ground_px = round((15.0 - y0) / vb_h * h)
         self.move(cx - w // 2, regular_feet_y - ground_px)
 
@@ -657,24 +799,20 @@ class ClawdWindow(QWidget):
         self._view.setHtml(html, base)
         self._refresh_debug()
 
-    # ── Debug overlay ─────────────────────────────────────────────────────
+    # ── Debug panel ───────────────────────────────────────────────────────
 
     def _refresh_debug(self):
-        """Actualiza la etiqueta de debug (solo visible con debug activo)."""
+        """Muestra u oculta el panel de debug y lo actualiza."""
         if not self._debug_mode:
-            self._debug_lbl.hide()
+            self._debug_panel.hide_panel()
             return
-        pid   = self._claude_pid
-        alive = _is_pid_alive(pid) if pid else None
-        pid_s = f"{pid} {'✓' if alive else '✗'}" if pid else "?"
-        ev    = self._claude_event + (f" → {self._claude_tool}" if self._claude_tool else "")
-        text  = f"claude: {ev}\npid:    {pid_s}\nsid:    {self.session_id[:8]}"
-        self._debug_lbl.setText(text)
-        self._debug_lbl.adjustSize()
-        lx = max(0, (self.width() - self._debug_lbl.width()) // 2)
-        self._debug_lbl.move(lx, 2)
-        self._debug_lbl.raise_()
-        self._debug_lbl.show()
+        self._debug_panel.show_panel()
+
+    def moveEvent(self, event):
+        """Reposiciona el panel de debug cuando el pet se mueve."""
+        super().moveEvent(event)
+        if self._debug_mode:
+            self._debug_panel._reposition()
 
     # ── Position ──────────────────────────────────────────────────────────
 
@@ -808,6 +946,7 @@ class ClawdWindow(QWidget):
         for mini in self._mini_pets:
             mini.close_mini()
         self._mini_pets.clear()
+        self._debug_panel.hide_panel()
 
         self._load_going_away(reverse=False)
         QTimer.singleShot(self.ANIM_AWAY_MS, self._do_close)
