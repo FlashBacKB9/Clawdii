@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+state.json
+
+# Archivos de la versión antigua (no parte del proyecto actual)
+main.py
+pet.py
+assets/
