@@ -55,9 +55,7 @@ Y Claude Code se encargará de clonar el repo y ejecutar `python install.py`.
 
 - **Clic izquierdo** → enfoca la ventana de Claude Code asociada
 - **Clic derecho** → menú con opciones:
-  - ⬆/⬇ Subir/Bajar posición vertical
   - 📌 Quieto — desactiva el vagabundeo
-  - 🐛 Debug — muestra el estado actual del hook encima del sprite
   - Cerrar — cierra el pet con animación
 
 ## Estructura del proyecto
@@ -78,8 +76,8 @@ Elimina las entradas de `clawd_hook.py` de `~/.claude/settings.json` y borra la 
 
 ## Créditos
 
-**Proyecto y dirección:** [Guillermo López](https://github.com/FlashBacKB9)  
-**Assets SVG y código:** Diseñados y generados con [Claude](https://claude.ai) (Anthropic) en colaboración con el autor.
+**Proyecto y código:** [Guillermo López](https://github.com/FlashBacKB9)  
+**Assets SVG:** tomados de [marciogranzotto/clawd-tank](https://github.com/marciogranzotto/clawd-tank) — muchas gracias por los sprites 🦀
 
 ## Licencia
 

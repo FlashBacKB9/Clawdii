@@ -71,8 +71,8 @@ from PySide6.QtCore import Qt, QPoint, QTimer, QUrl
 from PySide6.QtGui import QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMenu,
-                                QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QHBoxLayout, QLabel,
+                                QMenu, QPushButton, QVBoxLayout, QWidget)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -83,46 +83,41 @@ SCALE       = 5
 MINI_SCALE  = 3    # render scale for mini-pet sub-agents
 MINI_ORBIT  = 80   # max px each mini can stray from parent center X
 
-_VB_WIDE   = "-2 -4 19 22"     # 95×110  — margen 4u arriba (bounce-anim llega a y≈-3.4)
-_VB_HAPPY  = "-8 -12 30 30"   # 150×150 — happy: chispas en y=-8, x=-6, x=20
-_VB_OVER   = "-2 -6 19 24"    # 95×120  — overhead: partículas conducting/juggling (stream en y≈-3)
-_VB_TALL   = "-2 -14 20 32"   # 100×160 — bocadillo alto sobre la cabeza
-_VB_SLEEP  = "-2 -10 20 28"   # 100×140 — postura splooted
-_VB_DEBUG  = "-2 -4 22 22"    # 110×110 — debugger: hunch-walk traslada +3px en X, brazo llega a x=18
-_VB_AWAY   = "-15 -25 45 45"  # 225×225 — animación de entrada/salida (excava el suelo)
-_VB_BEACON = "-3 -5 21 23"    # 105×115 — beacon: cuerpo + ondas hasta r≈11 (bottom=-5+23=18 ✓)
-_VB_BUILD  = "-2 -4 25 22"    # 125×110 — building: cuerpo + martillo + yunque (x=17-22) + chispas
-
-# Regla: el bottom del viewBox = y0 + h = 18 en todos los sprites normales.
-# Los 3 u extra bajo los pies (y=15) capturan el body-bob y la sombra.
-# _VB_WIDE: -4+22=18 ✓  _VB_OVER: -6+24=18 ✓  _VB_TALL: -14+32=18 ✓
-# _VB_SLEEP: -10+28=18 ✓  _VB_BEACON: -5+23=18 ✓  _VB_BUILD: -4+22=18 ✓
-
+# ViewBox calibrados manualmente con el panel de debug (y_offset global = 15)
 SPRITE_MAP: dict[str, tuple[str, str]] = {
-    "idle":        ("clawd-idle-living.svg",         _VB_WIDE),
-    "walk":        ("clawd-crab-walking.svg",         _VB_WIDE),
-    "sleep":       ("clawd-sleeping.svg",             _VB_SLEEP),
-    "happy":       ("clawd-happy.svg",                _VB_HAPPY),
-    "conducting":  ("clawd-working-conducting.svg",   _VB_OVER),
-    "juggling":    ("clawd-working-juggling.svg",     _VB_OVER),
-    "pensando":    ("clawd-working-thinking.svg",     _VB_TALL),
-    "writing":     ("clawd-working-typing.svg",       _VB_WIDE),
-    "reading":     ("clawd-working-debugger.svg",     _VB_DEBUG),
-    "searching":   ("clawd-working-beacon.svg",       _VB_BEACON),
-    "executing":   ("clawd-working-building.svg",     _VB_BUILD),
-    "confused":    ("clawd-working-confused.svg",     _VB_OVER),
-    "notification":("clawd-notification.svg",         _VB_TALL),
-    "going_away":  ("clawd-going-away.svg",           _VB_AWAY),
+    "idle":         ("clawd-idle-living.svg",         "-2 1.5 19 16"),
+    "walk":         ("clawd-crab-walking.svg",         "-2 2 19 15.5"),
+    "sleep":        ("clawd-sleeping.svg",             "-2.5 1.5 20 27"),
+    "happy":        ("clawd-happy.svg",                "-8 -12 30 30"),
+    "conducting":   ("clawd-working-conducting.svg",   "-2 -6 19 24"),
+    "juggling":     ("clawd-working-juggling.svg",     "-2 -1.5 19 20"),
+    "pensando":     ("clawd-working-thinking.svg",     "-2 -8.5 20 26.5"),
+    "writing":      ("clawd-working-typing.svg",       "-2 -4 19 22"),
+    "reading":      ("clawd-working-debugger.svg",     "-2 2 22 16.5"),
+    "searching":    ("clawd-working-beacon.svg",       "-10.5 -13 36 36"),   # y_extra=26
+    "executing":    ("clawd-working-building.svg",     "-2 -4 25 22"),
+    "confused":     ("clawd-working-confused.svg",     "-10 -6 27.5 24"),
+    "notification": ("clawd-notification.svg",         "-2 -14 24.5 32"),
+    "overheated":   ("clawd-working-overheated.svg",   "-8 -12 30 30"),      # calibrar
+    "going_away":   ("clawd-going-away.svg",           "-15 -25 45 45"),
+}
+
+# Offset vertical adicional (sobre _y_offset=15) para sprites que ocupan más espacio aéreo
+SPRITE_YOFFSET: dict[str, int] = {
+    "searching": 26,   # beacon+ondas: calibrado y_offset=41 → extra=26
+}
+
+# Offset horizontal adicional: mueve la ventana N px a la izquierda (negativo) o derecha
+# para compensar sprites cuyo contenido no está centrado en su viewBox.
+SPRITE_XOFFSET: dict[str, int] = {
+    "confused": -15,   # contenido descentrado hacia la derecha del viewBox → mover ventana a la izq.
 }
 
 # Sprites chosen at random when Claude is "thinking"
 THINKING_SPRITES = ["conducting", "juggling", "pensando"]
 
-# Per-sprite scale override: el beacon (searching) es compacto visualmente,
-# un 10 % extra lo iguala al resto.
-SPRITE_SCALE: dict[str, float] = {
-    "searching": 1.10,
-}
+# Per-sprite scale multiplier (1.0 = sin override)
+SPRITE_SCALE: dict[str, float] = {}
 
 # Maps Claude Code tool names → internal state names
 TOOL_STATE: dict[str, str] = {
@@ -153,6 +148,24 @@ TOOL_STATE: dict[str, str] = {
 # Thread-safe queue: filled by TCP thread, drained by Qt timer on main thread
 _evt_queue: queue.SimpleQueue = queue.SimpleQueue()
 
+# ── Usage-limit / overheated detection ───────────────────────────────────────
+
+_LIMIT_KEYWORDS = (
+    "usage limit", "rate limit", "context limit", "context window",
+    "token limit", "overloaded", "at capacity", "out of context",
+    "i'm unable to", "i am unable to", "no longer able",
+    "límite de uso", "límite de contexto", "tope de uso",
+    "límite de tokens", "ventana de contexto",
+)
+
+def _looks_overheated(text: str) -> bool:
+    """True si el texto sugiere que Claude ha llegado al límite de uso/contexto."""
+    if not text:
+        return False
+    t = text.lower()
+    return any(kw in t for kw in _LIMIT_KEYWORDS)
+
+
 # ── Question / option detection (para decidir sprite notification vs happy) ────
 
 def _response_needs_reply(text: str) -> bool:
@@ -176,7 +189,7 @@ def _response_needs_reply(text: str) -> bool:
 # ── Debug panel ──────────────────────────────────────────────────────────────
 
 class _DebugPanel(QWidget):
-    """Panel flotante de debug con info de estado y controles de ajuste en vivo."""
+    """Panel flotante de debug: info de estado, selector de sprite y controles de ajuste."""
 
     _PANEL_SS = """
         _DebugPanel {
@@ -185,10 +198,10 @@ class _DebugPanel(QWidget):
             border-radius: 4px;
         }
     """
-    _LBL_SS   = "color:#7FFF00; font-family:Consolas,monospace; font-size:10px; background:transparent; border:none;"
-    _SEP_SS   = "color:#2A2A4E; font-family:Consolas,monospace; font-size:8px;  background:transparent; border:none;"
-    _VAL_SS   = "color:#FFFFFF; font-family:Consolas,monospace; font-size:10px; font-weight:bold; background:transparent; border:none; min-width:36px;"
-    _BTN_SS   = """
+    _LBL_SS = "color:#7FFF00; font-family:Consolas,monospace; font-size:10px; background:transparent; border:none;"
+    _SEP_SS = "color:#2A2A4E; font-family:Consolas,monospace; font-size:8px;  background:transparent; border:none;"
+    _VAL_SS = "color:#FFFFFF; font-family:Consolas,monospace; font-size:10px; font-weight:bold; background:transparent; border:none; min-width:36px;"
+    _BTN_SS = """
         QPushButton {
             color:#7FFF00; background:#1A1A30;
             border:1px solid #7FFF00; border-radius:2px;
@@ -199,10 +212,43 @@ class _DebugPanel(QWidget):
         QPushButton:hover   { background:#2A2A50; }
         QPushButton:pressed { background:#7FFF00; color:#0D0D1F; }
     """
+    _CMB_SS = """
+        QComboBox {
+            color: #7FFF00;
+            background: #1A1A30;
+            border: 1px solid #7FFF00;
+            border-radius: 2px;
+            font-family: Consolas, monospace;
+            font-size: 10px;
+            padding: 1px 4px;
+            min-height: 22px;
+        }
+        QComboBox:hover { background: #2A2A50; }
+        QComboBox::drop-down { border: none; width: 18px; }
+        QComboBox QAbstractItemView {
+            background: #0D0D1F;
+            color: #7FFF00;
+            border: 1px solid #7FFF00;
+            selection-background-color: #2A2A50;
+            font-family: Consolas, monospace;
+            font-size: 10px;
+        }
+    """
+    _BTN_RESUME_SS = """
+        QPushButton {
+            color: #0D0D1F; background: #7FFF00;
+            border: none; border-radius: 2px;
+            font-family: Consolas; font-size: 10px; font-weight: bold;
+            min-height: 22px; padding: 0 8px;
+        }
+        QPushButton:hover   { background: #AAFF44; }
+        QPushButton:pressed { background: #5FBF00; }
+    """
 
     def __init__(self, pet: "ClawdWindow"):
         super().__init__(None)
-        self._pet = pet
+        self._pet          = pet
+        self._block_combo  = False   # evita bucle signal→refresh→setCurrentIndex→signal
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
             | Qt.Tool | Qt.NoDropShadowWindowHint
@@ -220,20 +266,65 @@ class _DebugPanel(QWidget):
         self._info.setTextFormat(Qt.PlainText)
         root.addWidget(self._info)
 
-        sep = QLabel("─" * 28)
-        sep.setStyleSheet(self._SEP_SS)
-        root.addWidget(sep)
+        self._sep(root)
+
+        # ── Selector de sprite (forzado manual) ───────────────────────────
+        row_c = QHBoxLayout()
+        row_c.setSpacing(5)
+        lbl_c = QLabel("forzar  ")
+        lbl_c.setStyleSheet(self._LBL_SS)
+        lbl_c.setFixedWidth(62)
+        row_c.addWidget(lbl_c)
+        self._state_combo = QComboBox()
+        self._state_combo.setStyleSheet(self._CMB_SS)
+        for key in SPRITE_MAP:
+            self._state_combo.addItem(key)
+        self._state_combo.currentTextChanged.connect(self._on_state_changed)
+        row_c.addWidget(self._state_combo, stretch=1)
+        root.addLayout(row_c)
+
+        self._resume_btn = QPushButton("▶  Reanudar")
+        self._resume_btn.setStyleSheet(self._BTN_RESUME_SS)
+        self._resume_btn.clicked.connect(self._on_resume)
+        self._resume_btn.hide()
+        root.addWidget(self._resume_btn)
+
+        self._sep(root)
 
         # ── Fila y_offset ─────────────────────────────────────────────────
         self._y_val = self._add_control_row(root, "y_offset",
                                             lambda: self._adjust("y", -1),
                                             lambda: self._adjust("y", +1))
 
-        # ── Fila escala ───────────────────────────────────────────────────
+        # ── Fila escala (SVG u/px) ─────────────────────────────────────────
         self._s_val = self._add_control_row(root, "escala  ",
                                             lambda: self._adjust("s", -1),
                                             lambda: self._adjust("s", +1))
+
+        self._sep(root)
+
+        # ── ViewBox: controla qué parte del SVG se ve (paso ±0.5 u SVG) ─
+        # vb x0 y0 W H → ajuste del recuadro de recorte del sprite
+        self._vbx_val = self._add_control_row(root, "vb x0   ",
+                                              lambda: self._adjust_vb("x", -0.5),
+                                              lambda: self._adjust_vb("x", +0.5))
+        self._vby_val = self._add_control_row(root, "vb y0   ",
+                                              lambda: self._adjust_vb("y", -0.5),
+                                              lambda: self._adjust_vb("y", +0.5))
+        self._vbw_val = self._add_control_row(root, "vb W    ",
+                                              lambda: self._adjust_vb("w", -0.5),
+                                              lambda: self._adjust_vb("w", +0.5))
+        self._vbh_val = self._add_control_row(root, "vb H    ",
+                                              lambda: self._adjust_vb("h", -0.5),
+                                              lambda: self._adjust_vb("h", +0.5))
         self.hide()
+
+    # ── Helpers de construcción ────────────────────────────────────────────
+
+    def _sep(self, layout: QVBoxLayout):
+        s = QLabel("─" * 28)
+        s.setStyleSheet(self._SEP_SS)
+        layout.addWidget(s)
 
     def _add_control_row(self, layout: QVBoxLayout, label: str,
                          on_minus, on_plus) -> QLabel:
@@ -252,7 +343,7 @@ class _DebugPanel(QWidget):
 
         val = QLabel("0")
         val.setStyleSheet(self._VAL_SS)
-        val.setFixedWidth(38)
+        val.setFixedWidth(44)
         val.setAlignment(Qt.AlignCenter)
         row.addWidget(val)
 
@@ -265,36 +356,109 @@ class _DebugPanel(QWidget):
         layout.addLayout(row)
         return val
 
+    # ── Sprite forzado ─────────────────────────────────────────────────────
+
+    def _on_state_changed(self, text: str):
+        """El usuario eligió un sprite en el combo → forzarlo y congelar el estado."""
+        if self._block_combo or not text or text not in SPRITE_MAP:
+            return
+        pet = self._pet
+        pet._vb_override = None   # Volver al viewBox por defecto del sprite
+        pet._frozen      = True   # Bloquear cambios automáticos
+        pet._state       = text
+        pet._current_key = ""
+        if text == "going_away":
+            pet._load_going_away(reverse=False)
+        else:
+            pet._load_sprite(text)
+        self.refresh()            # Actualizar botón Reanudar y texto de info
+
+    def _on_resume(self):
+        """Descongelar: volver a comportamiento automático."""
+        pet = self._pet
+        pet._frozen = False
+        pet._touch_activity()
+        self.refresh()
+
     # ── Ajuste en vivo ─────────────────────────────────────────────────────
 
-    def _adjust(self, which: str, delta: int):
-        pet = self._pet
+    def _adjust(self, which: str, delta: int | float):
+        pet    = self._pet
+        sprite = pet._debug_sprite or "idle"
         if which == "y":
             pet._y_offset = max(-30, min(80, pet._y_offset + delta))
             if not pet._dragging:
                 pet.move(pet.x(), pet._taskbar_y())
-        else:
-            pet._scale = max(2, min(12, pet._scale + delta))
+        elif which == "s":
+            pet._scale = max(1.0, min(15.0, pet._scale + delta))
             pet._current_key = ""
-            if pet._debug_sprite and pet._debug_sprite in SPRITE_MAP:
-                pet._load_sprite(pet._debug_sprite)
+            if sprite in SPRITE_MAP:
+                if sprite == "going_away":
+                    pet._load_going_away()
+                else:
+                    pet._load_sprite(sprite)
+        self.refresh()
+
+    def _adjust_vb(self, which: str, delta: float):
+        """Ajusta una componente del viewBox SVG (x0/y0/W/H) en unidades SVG."""
+        pet    = self._pet
+        sprite = pet._debug_sprite or "idle"
+        if sprite not in SPRITE_MAP or sprite == "going_away":
+            return
+        # Inicializar override desde el viewBox por defecto del sprite si no está activo
+        if pet._vb_override is None:
+            _, vb = SPRITE_MAP[sprite]
+            pet._vb_override = [float(v) for v in vb.split()]
+        idx = {"x": 0, "y": 1, "w": 2, "h": 3}[which]
+        pet._vb_override[idx] += delta
+        # Clamp: W y H deben ser positivos
+        if idx in (2, 3):
+            pet._vb_override[idx] = max(0.5, pet._vb_override[idx])
+        pet._current_key = ""
+        pet._load_sprite(sprite)
         self.refresh()
 
     # ── Datos y posición ───────────────────────────────────────────────────
 
     def refresh(self):
         """Actualiza texto, valores y reposiciona el panel encima del pet."""
-        pet = self._pet
+        pet      = self._pet
         svg_name = SPRITE_MAP.get(pet._debug_sprite, ("?",))[0]
         svg_short = svg_name.replace("clawd-", "").replace(".svg", "") if svg_name != "?" else "?"
 
+        # ViewBox efectivo (override o default)
+        sprite = pet._debug_sprite or pet._state
+        if pet._vb_override is not None:
+            vbv = pet._vb_override
+        elif sprite in SPRITE_MAP:
+            _, vb = SPRITE_MAP[sprite]
+            vbv = [float(v) for v in vb.split()]
+        else:
+            vbv = [0.0, 0.0, 0.0, 0.0]
+
+        frozen_line = "❄  CONGELADO\n" if pet._frozen else ""
         self._info.setText(
+            f"{frozen_line}"
             f"estado:  {pet._state}\n"
             f"sprite:  {svg_short}\n"
-            f"escala:  {pet._scale}  ({pet.width()} × {pet.height()} px)"
+            f"escala:  {pet._scale:.2f}  ({pet.width()} × {pet.height()} px)\n"
+            f"vb:  {vbv[0]:g} {vbv[1]:g} {vbv[2]:g} {vbv[3]:g}"
         )
+        self._resume_btn.setVisible(pet._frozen)
         self._y_val.setText(str(pet._y_offset))
-        self._s_val.setText(str(pet._scale))
+        self._s_val.setText(f"{pet._scale:.2f}")
+        self._vbx_val.setText(f"{vbv[0]:g}")
+        self._vby_val.setText(f"{vbv[1]:g}")
+        self._vbw_val.setText(f"{vbv[2]:g}")
+        self._vbh_val.setText(f"{vbv[3]:g}")
+
+        # Sincronizar combo al sprite actual sin disparar el signal
+        self._block_combo = True
+        idx = self._state_combo.findText(pet._debug_sprite or pet._state)
+        if idx >= 0:
+            self._state_combo.setCurrentIndex(idx)
+        self._block_combo = False
+
         self.adjustSize()
         self._reposition()
 
@@ -302,7 +466,7 @@ class _DebugPanel(QWidget):
         scr = QApplication.primaryScreen().availableGeometry()
         pg  = self._pet.frameGeometry()
         cx  = pg.left() + pg.width() // 2
-        pw  = max(self.width(), 240)
+        pw  = max(self.width(), 260)
         x   = max(4, min(cx - pw // 2, scr.right() - pw - 4))
         y   = max(4, pg.top() - self.height() - 6)
         self.move(x, y)
@@ -319,13 +483,17 @@ class _DebugPanel(QWidget):
 # ── HTML generation ───────────────────────────────────────────────────────────
 
 def _make_html(name: str, flip: bool = False,
-               reverse: bool = False) -> tuple[str, QUrl]:
+               reverse: bool = False,
+               vb_str: str | None = None) -> tuple[str, QUrl]:
     """Wrap an SVG file in transparent HTML, adjusting its viewBox.
 
     reverse=True inverts all CSS animations (used for the entry/appearing
     variant of the going-away animation).
+    vb_str overrides the viewBox from SPRITE_MAP (used by the debug panel).
     """
     svg_file, vb = SPRITE_MAP[name]
+    if vb_str:
+        vb = vb_str
     path = SVG_DIR / svg_file
     content = path.read_text(encoding="utf-8")
 
@@ -373,8 +541,8 @@ def _make_html(name: str, flip: bool = False,
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-  html,body{{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;}}
-  svg{{display:block;width:100%;height:100%;{flip_css}}}{reverse_css}
+  html,body{{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;border:none;outline:none;}}
+  svg{{display:block;width:100%;height:100%;background:transparent;{flip_css}}}{reverse_css}
 </style></head>
 <body>{content}</body></html>"""
     return html, QUrl.fromLocalFile(str(path))
@@ -513,7 +681,10 @@ class MiniClawdWindow(QWidget):
           mini_top    = pies_padre − (mini_height − 3 * MINI_SCALE)
         """
         scr = QApplication.primaryScreen().availableGeometry()
-        parent_feet_y = scr.bottom() + self._parent._y_offset - 3 * self._parent._scale
+        parent_feet_y = (scr.bottom()
+                         + self._parent._y_offset
+                         + self._parent._sprite_y_extra
+                         - 3 * self._parent._scale)
         return parent_feet_y - (self.height() - 3 * MINI_SCALE)
 
     def _place_near_parent(self):
@@ -677,7 +848,22 @@ class ClawdWindow(QWidget):
         self._debug_panel  = _DebugPanel(self)
 
         # Escala de renderizado (px por unidad SVG); ajustable desde el panel de debug
-        self._scale = SCALE   # default: 5
+        self._scale = SCALE   # default: 5 (float en tiempo de ejecución si se usa ventana px)
+
+        # Override de viewBox para el sprite actual (None = usar SPRITE_MAP default).
+        # Se establece desde el panel de debug para calibrar el recorte SVG.
+        self._vb_override: list[float] | None = None
+
+        # Cuando True el estado no cambia automáticamente (congelado desde el panel de debug).
+        self._frozen = False
+
+        # Offset vertical adicional del sprite actual (SPRITE_YOFFSET[name], default 0)
+        self._sprite_y_extra = 0
+
+        # Centro horizontal del pet en coordenadas de pantalla — se mantiene constante
+        # al cambiar de sprite para que el cangrejito no salte lateralmente.
+        # Se inicializa en _place_on_taskbar y se actualiza en drag y en walking.
+        self._anchor_cx: int = -1
 
         # Rendering state
         self._current_key = ""
@@ -694,7 +880,7 @@ class ClawdWindow(QWidget):
         self._idle_secs = 0
 
         # Offset vertical (ajustable con clic derecho)
-        self._y_offset = 16
+        self._y_offset = 15
 
         # Si True, el pet no camina solo (se queda quieto en idle)
         self._locked = False
@@ -741,25 +927,42 @@ class ClawdWindow(QWidget):
     # ── Rendering ─────────────────────────────────────────────────────────
 
     def _load_sprite(self, name: str):
-        key = f"{name}:{self._direction}"
+        # ViewBox efectivo: override de debug o valor por defecto del sprite
+        _, default_vb = SPRITE_MAP[name]
+        if self._vb_override is not None:
+            x0, y0, vb_w, vb_h = self._vb_override
+            vb_str = f"{x0} {y0} {vb_w} {vb_h}"
+        else:
+            vb_str = None
+            x0, y0, vb_w, vb_h = (float(v) for v in default_vb.split())
+
+        key = f"{name}:{self._direction}:{vb_str or ''}"
         if key == self._current_key:
             return  # already loaded, don't interrupt animation
         self._current_key = key
         self._debug_sprite = name   # track for debug overlay
 
-        _, vb = SPRITE_MAP[name]
-        x0, y0, vb_w, vb_h = (float(v) for v in vb.split())
+        # Offset vertical extra según sprite (p.ej. searching sube 26 px extra)
+        self._sprite_y_extra = SPRITE_YOFFSET.get(name, 0)
+
         sc = SPRITE_SCALE.get(name, 1.0)
         w, h = round(vb_w * self._scale * sc), round(vb_h * self._scale * sc)
 
         if self.width() != w or self.height() != h:
+            # Mantener el centro horizontal al cambiar de sprite
+            cx = self._anchor_cx if self._anchor_cx >= 0 else (self.x() + max(self.width(), w) // 2)
             self.resize(w, h)
             self._view.resize(w, h)
             self._overlay.resize(w, h)
             if not self._dragging:
-                self.move(self.x(), self._taskbar_y())
+                x_off = SPRITE_XOFFSET.get(name, 0)
+                scr   = QApplication.primaryScreen().availableGeometry()
+                new_x = max(0, min(cx - w // 2 + x_off, scr.width() - w))
+                self.move(new_x, self._taskbar_y())
+                # Actualizar anchor_cx (sin x_off para que sea el centro puro)
+                self._anchor_cx = new_x + w // 2 - x_off
 
-        html, base = _make_html(name, flip=(self._direction == -1))
+        html, base = _make_html(name, flip=(self._direction == -1), vb_str=vb_str)
         self._view.setHtml(html, base)
         self._refresh_debug()
 
@@ -799,6 +1002,26 @@ class ClawdWindow(QWidget):
         self._view.setHtml(html, base)
         self._refresh_debug()
 
+    # ── Windows 11: sin esquinas redondeadas ─────────────────────────────
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fix_win11_corners()
+
+    def _fix_win11_corners(self):
+        """Windows 11 aplica esquinas redondeadas a toda ventana, incluso frameless.
+        Eso produce un borde visible de 1-2px alrededor de la viewbox.
+        DWMWCP_DONOTROUND (1) lo desactiva sin tocar la política DWM, que es
+        la que Qt usa para WA_TranslucentBackground."""
+        try:
+            hwnd = int(self.winId())
+            # DWMWA_WINDOW_CORNER_PREFERENCE = 33 (Windows 11+)
+            # DWMWCP_DONOTROUND = 1
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 33, ctypes.byref(ctypes.c_int(1)), 4)
+        except Exception:
+            pass   # Windows 10 — no existe, silenciar
+
     # ── Debug panel ───────────────────────────────────────────────────────
 
     def _refresh_debug(self):
@@ -817,12 +1040,14 @@ class ClawdWindow(QWidget):
     # ── Position ──────────────────────────────────────────────────────────
 
     def _taskbar_y(self) -> int:
-        return QApplication.primaryScreen().availableGeometry().bottom() - self.height() + self._y_offset
+        scr = QApplication.primaryScreen().availableGeometry()
+        return scr.bottom() - self.height() + self._y_offset + self._sprite_y_extra
 
     def _place_on_taskbar(self, x_hint: int = 0):
         screen = QApplication.primaryScreen().availableGeometry()
         x = screen.width() - 150 - x_hint
-        x = max(10, min(x, screen.width() - self.width() - 10))
+        x = max(10, min(x, screen.width() - 10))
+        self._anchor_cx = x   # refinado en el primer _load_sprite
         self.move(x, self._taskbar_y())
 
     # ── Helpers ───────────────────────────────────────────────────────────
@@ -869,6 +1094,8 @@ class ClawdWindow(QWidget):
         urgent=False → espera STATE_DELAY_MS y luego respeta STATE_MIN_SECS;
                        si llega otro cambio antes, descarta éste.
         """
+        if self._frozen:
+            return
         if urgent:
             self._state_delay_timer.stop()
             self._pending_state_args = None
@@ -892,6 +1119,8 @@ class ClawdWindow(QWidget):
 
     def _apply_state(self, state: str, sprite: str | None = None):
         """Aplica el cambio de estado inmediatamente y reinicia el contador mínimo."""
+        if self._frozen:
+            return
         self._state = state
         self._idle_secs = 0
         self._state_min_until = time.monotonic() + self.STATE_MIN_SECS
@@ -927,8 +1156,11 @@ class ClawdWindow(QWidget):
         else:
             self._dead_pid_count = 0
 
-        if self._state == "notification":
-            return
+        if self._frozen:
+            return   # congelado desde debug: no dormir ni cambiar estado
+
+        if self._state in ("notification", "overheated"):
+            return   # no dormir mientras espera respuesta o está en límite
         if self._state != "sleeping":
             elapsed = time.monotonic() - self._last_activity
             if elapsed > self.SLEEP_AFTER_SECS:
@@ -1031,16 +1263,19 @@ class ClawdWindow(QWidget):
     def on_stop(self, last_text: str = ""):
         """Response finished.
 
-        Si la respuesta termina con una pregunta o lista de opciones → notification.
+        Si el texto sugiere límite de uso/contexto → overheated (persiste).
+        Si termina con pregunta/opciones → notification.
         Respuesta normal → happy (3 s) → idle.
-        El usuario responde siempre en el terminal, sin burbujas.
         """
         self._set_claude_event("Stop")
         self._touch_activity()
+        if _looks_overheated(last_text):
+            self._walk_mode = "wander"
+            self._set_state("overheated", urgent=True)
+            return
         if _response_needs_reply(last_text):
             self._walk_mode = "wander"
             self._set_state("notification", urgent=True)
-            # Timeout de seguridad: si el usuario no responde en 5 min, happy → idle
             QTimer.singleShot(300_000, self._notification_timeout)
             return
         # Respuesta normal
@@ -1109,7 +1344,7 @@ class ClawdWindow(QWidget):
 
     def _tick_move(self):
         """30 ms: move pet when walking."""
-        if self._state != "walking" or self._dragging or self._locked:
+        if self._frozen or self._state != "walking" or self._dragging or self._locked:
             return
         screen = QApplication.primaryScreen().availableGeometry()
         nx = self.x() + self._direction * SPEED
@@ -1126,10 +1361,11 @@ class ClawdWindow(QWidget):
             self._load_sprite("walk")
 
         self.move(nx, self.y())
+        self._anchor_cx = nx + self.width() // 2   # seguir el centro durante walking
 
     def _tick_second(self):
         """1 s: handle idle wandering."""
-        if self._dragging:
+        if self._frozen or self._dragging:
             return
 
         if self._state == "idle":
@@ -1181,6 +1417,9 @@ class ClawdWindow(QWidget):
             QTimer.singleShot(1_200, lambda: self._restore_after_click(prev_key))
         else:
             self.move(self.x(), self._taskbar_y())
+            # Actualizar anchor tras drag (sin x_off del sprite actual)
+            x_off = SPRITE_XOFFSET.get(self._debug_sprite or "", 0)
+            self._anchor_cx = self.x() + self.width() // 2 - x_off
         self._dragging = False
 
     def _restore_after_click(self, _prev_key: str):
@@ -1204,40 +1443,22 @@ class ClawdWindow(QWidget):
     def _show_menu(self, pos: QPoint):
         menu = QMenu()
         menu.setWindowFlags(menu.windowFlags() | Qt.WindowStaysOnTopHint)
-        menu.addAction("⬆  Subir").setData("up")
-        menu.addAction("⬇  Bajar").setData("down")
-        menu.addSeparator()
         lock = menu.addAction("📌 Quieto")
         lock.setCheckable(True)
         lock.setChecked(self._locked)
         lock.setData("lock")
-        dbg = menu.addAction("🐛 Debug")
-        dbg.setCheckable(True)
-        dbg.setChecked(self._debug_mode)
-        dbg.setData("debug")
         menu.addSeparator()
         menu.addAction("Cerrar").setData("close")
         chosen = menu.exec(pos)
         if not chosen:
             return
         cmd = chosen.data()
-        if cmd == "up":
-            self._y_offset = max(0, self._y_offset - 8)
-            if not self._dragging:
-                self.move(self.x(), self._taskbar_y())
-        elif cmd == "down":
-            self._y_offset = min(60, self._y_offset + 8)
-            if not self._dragging:
-                self.move(self.x(), self._taskbar_y())
-        elif cmd == "lock":
+        if cmd == "lock":
             self._locked = not self._locked
             # Si estaba caminando, volver a idle inmediatamente
             if self._locked and self._state == "walking":
                 self._apply_state("idle")
                 self._idle_secs = 0
-        elif cmd == "debug":
-            self._debug_mode = not self._debug_mode
-            self._refresh_debug()
         elif cmd == "close":
             self.close_with_animation()
 
