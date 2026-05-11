@@ -8,20 +8,22 @@ Un pet de escritorio para Windows que vive en la barra de tareas y reacciona en 
 
 Claw'dii es un cangrejo pixel-art animado que se conecta a Claude Code mediante hooks y muestra visualmente el estado del agente:
 
-| Estado Claude Code | Sprite |
-|---|---|
-| Pensando | Uno de: dirigiendo, haciendo malabares, pensando |
-| Escribiendo código | Tecleando |
-| Leyendo/buscando archivos | Detective con lupa |
-| Buscando en la web | Antena con ondas |
-| Ejecutando comandos | Construcción |
-| Esperando respuesta | Notificación |
-| Respuesta completada | Chispas de alegría → idle |
-| Inactivo 2 min | Durmiendo |
-| Nueva sesión / `/clear` | Animación de aparecer desde el suelo |
-| Sesión cerrada | Animación de excavar y desaparecer |
+| Estado Claude Code | Sprite | Descripción |
+|---|:---:|---|
+| Pensando | ![](assets_svg/clawd-working-thinking.svg) ![](assets_svg/clawd-working-conducting.svg) ![](assets_svg/clawd-working-juggling.svg) | Uno de: pensando, dirigiendo, haciendo malabares |
+| Escribiendo código | ![](assets_svg/clawd-working-typing.svg) | Tecleando |
+| Leyendo / buscando archivos | ![](assets_svg/clawd-working-debugger.svg) | Detective con lupa |
+| Buscando en la web | ![](assets_svg/clawd-working-beacon.svg) | Antena con ondas |
+| Ejecutando comandos | ![](assets_svg/clawd-working-building.svg) | Construcción |
+| Esperando respuesta | ![](assets_svg/clawd-notification.svg) | Notificación |
+| Respuesta completada | ![](assets_svg/clawd-happy.svg) | Chispas de alegría → idle |
+| Inactivo 2 min | ![](assets_svg/clawd-sleeping.svg) | Durmiendo |
+| Vagabundeando | ![](assets_svg/clawd-crab-walking.svg) | Pasea por la barra de tareas |
+| Límite de uso alcanzado | ![](assets_svg/clawd-working-overheated.svg) | Sobrecalentado |
+| Nueva sesión / `/clear` | ![](assets_svg/clawd-going-away.svg) | Animación de aparecer desde el suelo |
+| Sesión cerrada | ![](assets_svg/clawd-going-away.svg) | Animación de excavar y desaparecer |
 
-También muestra **bocadillos interactivos** cuando Claude Code hace una pregunta (`AskUserQuestion`) o pide confirmación para editar un archivo, permitiendo responder sin tocar el teclado.
+También reacciona a **sub-agentes**: cuando Claude lanza agentes paralelos, aparecen cangrejos mini que vagan cerca del principal.
 
 ## Requisitos
 
@@ -33,7 +35,7 @@ También muestra **bocadillos interactivos** cuando Claude Code hace una pregunt
 
 ```bash
 git clone https://github.com/FlashBacKB9/Clawdii.git
-cd clawdii
+cd Clawdii
 python install.py
 ```
 
@@ -61,7 +63,7 @@ Y Claude Code se encargará de clonar el repo y ejecutar `python install.py`.
 ## Estructura del proyecto
 
 ```
-clawdii/
+Clawdii/
 ├── clawd_daemon.py     # Proceso principal (ventana Qt + lógica de estados)
 ├── clawd_hook.py       # Hook de Claude Code → envía eventos al daemon
 ├── install.py          # Instalador automático
@@ -76,9 +78,17 @@ Elimina las entradas de `clawd_hook.py` de `~/.claude/settings.json` y borra la 
 
 ## Créditos
 
-**Proyecto y código:** [Guillermo López](https://github.com/FlashBacKB9)  
-**Assets SVG:** tomados de [marciogranzotto/clawd-tank](https://github.com/marciogranzotto/clawd-tank) — muchas gracias por los sprites 🦀
+**Proyecto y código:** [Guillermo López](https://github.com/FlashBacKB9)
+
+**Assets SVG:** [marciogranzotto/clawd-tank](https://github.com/marciogranzotto/clawd-tank) — sprites pixel-art del cangrejo animado
+
+**Lógica de estados de sub-agentes:** inspirada en [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents)
 
 ## Licencia
 
-[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) — Libre para usar y modificar, **sin uso comercial**. Las obras derivadas deben mantener la misma licencia y dar crédito al autor original.
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+
+Libre para usar y modificar, **sin uso comercial**. Las obras derivadas deben:
+- Mantener la misma licencia (CC BY-NC-SA 4.0)
+- Dar crédito a [Guillermo López](https://github.com/FlashBacKB9) (este proyecto)
+- Dar crédito a [marciogranzotto](https://github.com/marciogranzotto/clawd-tank) (assets SVG originales)
