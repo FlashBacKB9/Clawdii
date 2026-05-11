@@ -260,13 +260,25 @@ def main() -> None:
         event = "tool_use"
     elif hook_event == "PostToolUse":
         event = "tool_done"
+    elif hook_event == "PostToolUseFailure":
+        event = "tool_fail"
     elif hook_event == "Stop":
         event = "stop"
+    elif hook_event == "SubagentStart":
+        event = "subagent_start"
+    elif hook_event in ("SubagentStop", "TeammateIdle", "TaskCompleted"):
+        event = "subagent_stop"
+    elif hook_event == "SessionEnd":
+        event = "session_end"
+    elif hook_event == "PermissionRequest":
+        event = "permission_request"
+    elif hook_event == "TaskCreated":
+        return  # no acción necesaria
     else:
         return
 
     msg: dict = {"session_id": session_id, "event": event, "source_pid": source_pid}
-    if event in ("tool_use", "tool_done") and tool_name:
+    if event in ("tool_use", "tool_done", "tool_fail") and tool_name:
         msg["tool"] = tool_name
         # Reenviar partes relevantes de tool_input según la herramienta
         tool_input = payload.get("tool_input", {})
@@ -283,6 +295,8 @@ def main() -> None:
         last = _find_last_text(session_id)
         if last:
             msg["last_text"] = last[-400:]   # últimos 400 chars
+    if event == "session_end":
+        msg["reason"] = payload.get("reason", "exit")
 
     send_to_daemon(msg)
 

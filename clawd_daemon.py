@@ -1274,8 +1274,7 @@ class ClawdWindow(QWidget):
             self._pending_questions = []
             if self._state == "notification":
                 self._set_state("thinking", urgent=True)
-        elif tool_name in ("Agent", "Task") and self._mini_pets:
-            self._mini_pets.pop(0).close_mini()
+        # Los mini-pets de Agent/Task se cierran vía on_subagent_stop().
 
     def on_tool_use(self, tool_name: str, tool_input: dict | None = None):
         """A tool is about to be used → show matching sprite."""
@@ -1291,12 +1290,10 @@ class ClawdWindow(QWidget):
             self._handle_ask_user(tool_input)
             return
 
-        # Sub-agente: spawnear un mini-pet que camina alrededor del padre
+        # Sub-agente: el spawn de mini-pets lo gestiona on_subagent_start().
+        # Aquí solo cambiamos el sprite a "executing".
         if tool_name in ("Agent", "Task"):
-            mini = MiniClawdWindow(self)
-            mini.show()
-            self._mini_pets.append(mini)
-            self._set_state("executing")
+            self._set_state("executing", urgent=True)
             return
 
         # Diálogo de confirmación (Edit/Write/Bash/PowerShell no pre-aprobados)
@@ -1434,6 +1431,51 @@ class ClawdWindow(QWidget):
         self._walk_mode = "wander"
         self._set_state("happy", urgent=True)
         QTimer.singleShot(3_000, self._finish_step_idle)
+
+    def on_subagent_start(self):
+        """Un sub-agente ha arrancado (SubagentStart) → spawnear mini-pet."""
+        self._touch_activity()
+        mini = MiniClawdWindow(self)
+        mini.show()
+        self._mini_pets.append(mini)
+        self._set_state("executing", urgent=True)
+
+    def on_subagent_stop(self):
+        """Un sub-agente ha terminado (SubagentStop / TeammateIdle / TaskCompleted)."""
+        if self._mini_pets:
+            self._mini_pets.pop(0).close_mini()
+        # Si ya no quedan sub-agentes activos, volver a thinking mientras Claude sigue
+        if not self._mini_pets and self._state == "executing":
+            self._set_state("thinking")
+
+    def on_tool_fail(self, tool_name: str = ""):
+        """Una herramienta falló (PostToolUseFailure) → sprite confundido 3 s."""
+        self._set_claude_event("PostToolUseFailure", tool_name)
+        self._touch_activity()
+        self._set_state("confused", urgent=True)
+        QTimer.singleShot(3_000, self._after_confused)
+
+    def _after_confused(self):
+        if self._state == "confused":
+            self._set_state("thinking", urgent=True)
+
+    def on_permission_request(self):
+        """Claude Code pide permiso al usuario (PermissionRequest)."""
+        self._set_claude_event("PermissionRequest")
+        self._touch_activity()
+        self._walk_mode = "wander"
+        self._set_state("notification", urgent=True)
+
+    def on_session_end(self, reason: str = "exit"):
+        """Sesión terminada (SessionEnd).
+
+        - exit / logout / error → cerrar con animación inmediatamente.
+        - clear → no hacemos nada; la lógica de /clear vía session_start ya
+          detecta el mismo PID y cierra el pet viejo automáticamente.
+        """
+        self._set_claude_event("SessionEnd")
+        if reason in ("exit", "logout", "error"):
+            self.close_with_animation()
 
     def _finish_step_idle(self):
         if self._state != "happy":
@@ -1687,8 +1729,18 @@ class ClawdDaemon:
             win.on_tool_use(tool, event.get("tool_input"))
         elif etype == "tool_done":
             win.on_tool_done(tool)
+        elif etype == "tool_fail":
+            win.on_tool_fail(tool)
         elif etype == "stop":
             win.on_stop(event.get("last_text", ""))
+        elif etype == "subagent_start":
+            win.on_subagent_start()
+        elif etype == "subagent_stop":
+            win.on_subagent_stop()
+        elif etype == "session_end":
+            win.on_session_end(event.get("reason", "exit"))
+        elif etype == "permission_request":
+            win.on_permission_request()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

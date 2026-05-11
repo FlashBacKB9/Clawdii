@@ -17,7 +17,14 @@ HERE       = Path(__file__).parent.resolve()
 HOOK_SCRIPT = HERE / "clawd_hook.py"
 SETTINGS    = Path.home() / ".claude" / "settings.json"
 
-HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]
+HOOK_EVENTS = [
+    "SessionStart", "UserPromptSubmit",
+    "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "Stop",
+    "SubagentStart", "SubagentStop",
+    "SessionEnd", "PermissionRequest",
+    "TeammateIdle", "TaskCompleted",
+]
 
 # ── Colores para la terminal ──────────────────────────────────────────────────
 
