@@ -87,7 +87,7 @@ MINI_ORBIT  = 80   # max px each mini can stray from parent center X
 SPRITE_MAP: dict[str, tuple[str, str]] = {
     "idle":         ("clawd-idle-living.svg",         "-2 1.5 19 16"),
     "walk":         ("clawd-crab-walking.svg",         "-2 2 19 15.5"),
-    "sleep":        ("clawd-sleeping.svg",             "-2.5 1.5 20 27"),
+    "sleep":        ("clawd-sleeping.svg",             "-2.5 -9 20 27"),
     "happy":        ("clawd-happy.svg",                "-8 -12 30 30"),
     "conducting":   ("clawd-working-conducting.svg",   "-2 -6 19 24"),
     "juggling":     ("clawd-working-juggling.svg",     "-2 -1.5 19 20"),
@@ -604,6 +604,7 @@ class MiniClawdWindow(QWidget):
         _page.setBackgroundColor(Qt.transparent)
         self._view.setPage(_page)
         self._view.setContextMenuPolicy(Qt.NoContextMenu)
+        self._view.setStyleSheet("background: transparent;")
 
         self._load_sprite("walk")
         self._place_near_parent()
@@ -618,12 +619,21 @@ class MiniClawdWindow(QWidget):
         self._beh_timer.timeout.connect(self._tick_behavior)
         self._beh_timer.start(random.randint(2000, 4000))
 
-    # ── Z-order ────────────────────────────────────────────────────────────
+    # ── Z-order y transparencia ────────────────────────────────────────────
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._fix_win11_corners()
         # Aplicar z-order inicial tras primer show (winId() ya válido)
         QTimer.singleShot(80, lambda: self._set_layer(True))
+
+    def _fix_win11_corners(self):
+        """Igual que en ClawdWindow: elimina esquinas redondeadas de Win11."""
+        try:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                int(self.winId()), 33, ctypes.byref(ctypes.c_int(1)), 4)
+        except Exception:
+            pass
 
     def _set_layer(self, in_front: bool):
         """Reordena mini y padre en el z-order de ventanas topmost.
