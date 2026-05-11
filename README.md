@@ -78,7 +78,7 @@ Elimina las entradas de `clawd_hook.py` de `~/.claude/settings.json` y borra la 
 
 ## Créditos
 
-**Proyecto y código:** [Guillermo López](https://github.com/FlashBacKB9)
+**Proyecto, código e integración con Claude Code:** [Guillermo López](https://github.com/FlashBacKB9) — hooks, lógica de estados, calibración de sprites, menú simplificado (sin controles de posición ni modo debug), fix de transparencia en Windows 11
 
 **Assets SVG:** [marciogranzotto/clawd-tank](https://github.com/marciogranzotto/clawd-tank) — sprites pixel-art del cangrejo animado
 
