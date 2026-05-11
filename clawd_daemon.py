@@ -80,18 +80,20 @@ SCALE       = 5
 MINI_SCALE  = 3    # render scale for mini-pet sub-agents
 MINI_ORBIT  = 80   # max px each mini can stray from parent center X
 
-_VB_WIDE  = "-2 -4 19 22"     # 95×110  — margen 4u arriba (bounce-anim llega a y≈-3.4)
-_VB_HAPPY = "-8 -12 30 30"    # 150×150 — happy: chispas en y=-8, x=-6, x=20
-_VB_OVER  = "-2 -6 19 24"     # 95×120  — overhead: partículas conducting/juggling (stream en y≈-3)
-_VB_TALL  = "-2 -14 20 32"    # 100×160 — bocadillo alto sobre la cabeza
-_VB_SLEEP = "-2 -10 20 28"    # 100×140 — postura splooted
-_VB_DEBUG = "-2 -4 22 22"     # 110×110 — debugger: hunch-walk traslada +3px en X, brazo llega a x=18
-_VB_AWAY  = "-15 -25 45 45"   # 225×225 — animación de entrada/salida (excava el suelo)
+_VB_WIDE   = "-2 -4 19 22"     # 95×110  — margen 4u arriba (bounce-anim llega a y≈-3.4)
+_VB_HAPPY  = "-8 -12 30 30"   # 150×150 — happy: chispas en y=-8, x=-6, x=20
+_VB_OVER   = "-2 -6 19 24"    # 95×120  — overhead: partículas conducting/juggling (stream en y≈-3)
+_VB_TALL   = "-2 -14 20 32"   # 100×160 — bocadillo alto sobre la cabeza
+_VB_SLEEP  = "-2 -10 20 28"   # 100×140 — postura splooted
+_VB_DEBUG  = "-2 -4 22 22"    # 110×110 — debugger: hunch-walk traslada +3px en X, brazo llega a x=18
+_VB_AWAY   = "-15 -25 45 45"  # 225×225 — animación de entrada/salida (excava el suelo)
+_VB_BEACON = "-3 -5 21 23"    # 105×115 — beacon: cuerpo + ondas hasta r≈11 (bottom=-5+23=18 ✓)
+_VB_BUILD  = "-2 -4 25 22"    # 125×110 — building: cuerpo + martillo + yunque (x=17-22) + chispas
 
-# Regla: el bottom del viewBox = y0 + h = 18 en todos los casos.
-# Los 2 u extra bajo los pies (y=16) capturan el body-bob y la sombra.
-# _VB_WIDE: -2+20=18 ✓  _VB_OVER: -6+24=18 ✓
-# _VB_TALL: -14+32=18 ✓  _VB_SLEEP: -10+28=18 ✓
+# Regla: el bottom del viewBox = y0 + h = 18 en todos los sprites normales.
+# Los 3 u extra bajo los pies (y=15) capturan el body-bob y la sombra.
+# _VB_WIDE: -4+22=18 ✓  _VB_OVER: -6+24=18 ✓  _VB_TALL: -14+32=18 ✓
+# _VB_SLEEP: -10+28=18 ✓  _VB_BEACON: -5+23=18 ✓  _VB_BUILD: -4+22=18 ✓
 
 SPRITE_MAP: dict[str, tuple[str, str]] = {
     "idle":        ("clawd-idle-living.svg",         _VB_WIDE),
@@ -103,8 +105,8 @@ SPRITE_MAP: dict[str, tuple[str, str]] = {
     "pensando":    ("clawd-working-thinking.svg",     _VB_TALL),
     "writing":     ("clawd-working-typing.svg",       _VB_WIDE),
     "reading":     ("clawd-working-debugger.svg",     _VB_DEBUG),
-    "searching":   ("clawd-working-beacon.svg",       _VB_WIDE),
-    "executing":   ("clawd-working-building.svg",     _VB_WIDE),
+    "searching":   ("clawd-working-beacon.svg",       _VB_BEACON),
+    "executing":   ("clawd-working-building.svg",     _VB_BUILD),
     "confused":    ("clawd-working-confused.svg",     _VB_OVER),
     "notification":("clawd-notification.svg",         _VB_TALL),
     "going_away":  ("clawd-going-away.svg",           _VB_AWAY),
