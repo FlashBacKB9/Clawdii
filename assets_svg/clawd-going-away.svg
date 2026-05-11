@@ -2,7 +2,7 @@
   <defs>
     <style>
       .digging-body {
-        animation: dig-down 3s forwards linear;
+        animation: dig-down 3s infinite linear;
       }
       .digging-arm-l {
         animation: frantic-dig-l 0.15s infinite ease-in-out;
@@ -15,10 +15,10 @@
       }
       .hole {
         transform-origin: 0px 0.5px;
-        animation: hole-open-close 3s forwards linear;
+        animation: hole-open-close 3s infinite linear;
       }
       .dirt-group {
-        animation: show-dirt 3s forwards linear;
+        animation: show-dirt 3s infinite linear;
       }
       .dirt-particle {
         opacity: 0;
