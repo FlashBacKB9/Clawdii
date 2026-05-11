@@ -20,8 +20,8 @@ Claw'dii es un cangrejo pixel-art animado que se conecta a Claude Code mediante 
 | Inactivo 2 min | ![](assets_svg/clawd-sleeping.svg) | Durmiendo |
 | Vagabundeando | ![](assets_svg/clawd-crab-walking.svg) | Pasea por la barra de tareas |
 | Límite de uso alcanzado | ![](assets_svg/clawd-working-overheated.svg) | Sobrecalentado |
-| Nueva sesión / `/clear` | ![](assets_svg/clawd-going-away.svg) | Animación de aparecer desde el suelo |
-| Sesión cerrada | ![](assets_svg/clawd-going-away.svg) | Animación de excavar y desaparecer |
+| Nueva sesión / `/clear` | ![](assets_svg/clawd-coming-ezgif.com-reverse.gif) | Animación de aparecer desde el suelo |
+| Sesión cerrada | ![](assets_svg/clawd-going-away-ezgif.com-gif-maker.gif) | Animación de excavar y desaparecer |
 
 También reacciona a **sub-agentes**: cuando Claude lanza agentes paralelos, aparecen cangrejos mini que vagan cerca del principal.
 
