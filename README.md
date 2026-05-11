@@ -32,7 +32,7 @@ También muestra **bocadillos interactivos** cuando Claude Code hace una pregunt
 ## Instalación
 
 ```bash
-git clone https://github.com/TU_USUARIO/clawdii.git
+git clone https://github.com/FlashBacKB9/Clawdii.git
 cd clawdii
 python install.py
 ```
@@ -47,7 +47,7 @@ Después de instalar, **reinicia Claude Code** o abre una nueva sesión. El cang
 
 Si ya tienes Claude Code abierto, puedes pedirle directamente:
 
-> "Clona https://github.com/TU_USUARIO/clawdii y ejecuta el instalador"
+> "Clona https://github.com/FlashBacKB9/Clawdii y ejecuta el instalador"
 
 Y Claude Code se encargará de clonar el repo y ejecutar `python install.py`.
 
@@ -73,3 +73,14 @@ clawdii/
 ## Desinstalar
 
 Elimina las entradas de `clawd_hook.py` de `~/.claude/settings.json` y borra la carpeta del proyecto.
+
+---
+
+## Créditos
+
+**Proyecto y dirección:** [Guillermo López](https://github.com/FlashBacKB9)  
+**Assets SVG y código:** Diseñados y generados con [Claude](https://claude.ai) (Anthropic) en colaboración con el autor.
+
+## Licencia
+
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) — Libre para usar y modificar, **sin uso comercial**. Las obras derivadas deben mantener la misma licencia y dar crédito al autor original.
