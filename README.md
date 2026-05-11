@@ -47,11 +47,13 @@ Después de instalar, **reinicia Claude Code** o abre una nueva sesión. El cang
 
 ## Instalación vía Claude Code
 
-Si ya tienes Claude Code abierto, puedes pedirle directamente:
+Si ya tienes Claude Code abierto, pégale esto directamente en el chat:
 
-> "Clona https://github.com/FlashBacKB9/Clawdii y ejecuta el instalador"
+```
+Clona https://github.com/FlashBacKB9/Clawdii.git en una carpeta temporal y ejecuta el instalador con Python. El instalador instala las dependencias y configura los hooks automáticamente. Cuando termine, reinicia Claude Code y aparecerá un cangrejo en la barra de tareas.
+```
 
-Y Claude Code se encargará de clonar el repo y ejecutar `python install.py`.
+Claude Code se encargará de clonar el repo y ejecutar `python install.py`.
 
 ## Uso
 
